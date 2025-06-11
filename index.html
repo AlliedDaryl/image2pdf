@@ -21,7 +21,6 @@
     button#generate { display: block; margin: 1.5rem auto 0; background: #e95420; color: white; border: none; border-radius: 4px; padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; transition: background .2s }
     button#generate:disabled { background: #ccc; cursor: not-allowed }
     button#generate:not(:disabled):hover { background: #ff7f3f }
-    /* Overlay */
     #overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); z-index: 100; align-items: center; justify-content: center; flex-direction: column }
     .loader { border: 8px solid #f3f3f3; border-top: 8px solid #e95420; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 1rem }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -38,35 +37,34 @@
       <h1>Image to PDF Converter</h1>
     </header>
     <main>
-      <p>Paste your email (Ctrl+V) or drag-and-drop images below. Thumbnails will appear; click the × to remove any. When ready, click “Generate PDF” to download.</p>
+      <p>Paste your email (Ctrl+V) or drag-and-drop images below. Thumbnails will appear; click the × to remove any. When ready, choose your output option and click “Generate PDF.”</p>
       <div id="dropzone" contenteditable="true">📋 Paste or drop images here</div>
       <div id="thumbnails"></div>
       <div id="status">No images yet</div>
+      <label style="display:block; text-align:center; margin-top:1rem">
+        <input type="checkbox" id="individualZip"> Generate individual PDFs and zip
+      </label>
       <button id="generate" disabled>Generate PDF</button>
     </main>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.0/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <script>
-    // Pre-instantiate jsPDF for faster startup
     const jsPDF = window.jspdf?.jsPDF || window.jsPDF;
-    let PDFClass;
-    if (jsPDF) {
-      PDFClass = jsPDF;
-      new jsPDF({ unit: 'px', format: [1, 1], autoFirstPage: false });
-    } else {
-      throw new Error('jsPDF missing');
-    }
+    if (!jsPDF) throw new Error('jsPDF missing');
 
     const dz = document.getElementById('dropzone');
     const thumbs = document.getElementById('thumbnails');
-    const status = document.getElementById('status');
+    const statusEl = document.getElementById('status');
     const overlay = document.getElementById('overlay');
     const btn = document.getElementById('generate');
+    const individualZip = document.getElementById('individualZip');
     let images = [];
 
     function updateStatus() {
-      status.textContent = images.length ? `${images.length} image(s) ready` : 'No images yet';
+      statusEl.textContent = images.length ? `${images.length} image(s) ready` : 'No images yet';
       btn.disabled = images.length === 0;
     }
 
@@ -93,19 +91,14 @@
         img.onerror = reject;
         if (src instanceof Blob) {
           const reader = new FileReader(); reader.onload = () => img.src = reader.result; reader.readAsDataURL(src);
-        } else {
-          img.src = src;
-        }
+        } else img.src = src;
       });
     }
 
-    // Paste support
     dz.addEventListener('paste', async e => {
       e.preventDefault();
       for (const item of e.clipboardData.items) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
-          addImage(await normalize(item.getAsFile()));
-        }
+        if (item.kind === 'file' && item.type.startsWith('image/')) addImage(await normalize(item.getAsFile()));
       }
       const html = e.clipboardData.getData('text/html');
       if (html) {
@@ -113,51 +106,62 @@
         for (const el of doc.querySelectorAll('img')) {
           try {
             const src = el.src;
-            if (src.startsWith('data:image/')) {
-              addImage(await normalize(src));
-            } else if (src.startsWith('http')) {
-              const blob = await (await fetch(src, { mode: 'cors' })).blob();
-              addImage(await normalize(blob));
-            }
+            if (src.startsWith('data:image/')) addImage(await normalize(src));
+            else if (src.startsWith('http')) addImage(await normalize(await (await fetch(src, { mode: 'cors' })).blob()));
           } catch {}
         }
       }
     });
 
-    // Drag & drop support
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('hover'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('hover'));
     dz.addEventListener('drop', async e => {
       e.preventDefault(); dz.classList.remove('hover');
-      for (const f of e.dataTransfer.files) {
-        if (f.type.startsWith('image/')) addImage(await normalize(f));
-      }
+      for (const f of e.dataTransfer.files) if (f.type.startsWith('image/')) addImage(await normalize(f));
     });
 
-    // Generate PDF with overlay & chunked loop
-    btn.onclick = () => {
+    function removeBlankPages(pdf) {
+      if (pdf.getNumberOfPages) {
+        while (pdf.getNumberOfPages() > 0) pdf.deletePage(1);
+      }
+    }
+
+    btn.onclick = async () => {
       overlay.style.display = 'flex';
-      setTimeout(() => {
-        if (!PDFClass) return;
-        const pdf = new PDFClass({ unit: 'px', autoFirstPage: false, compress: true });
-        // Remove any initial blank page
-        if (pdf.deletePage && pdf.getNumberOfPages && pdf.getNumberOfPages() > 0) {
-          pdf.deletePage(1);
-        }
-        let idx = 0;
-        const total = images.length;
-        const next = () => {
-          const img = images[idx];
-          pdf.addPage([img.width, img.height], img.width > img.height ? 'l' : 'p');
-          pdf.addImage(img.dataURL, 'PNG', 0, 0, img.width, img.height);
-          idx++;
-          if (idx < total) setTimeout(next, 0);
-          else {
-            pdf.save('alliedframers-images.pdf');
-            overlay.style.display = 'none';
+      setTimeout(async () => {
+        if (individualZip.checked) {
+          const zip = new JSZip();
+          for (let i = 0; i < images.length; i++) {
+            const img = images[i];
+            const pdf = new jsPDF({ unit: 'px', autoFirstPage: false, compress: true });
+            removeBlankPages(pdf);
+            pdf.addPage([img.width, img.height], img.width > img.height ? 'l' : 'p');
+            pdf.addImage(img.dataURL, 'PNG', 0, 0, img.width, img.height);
+            const blob = pdf.output('blob');
+            zip.file(`image_${Date.now()}_${i+1}.pdf`, blob);
           }
-        };
-        next();
+          zip.generateAsync({ type: 'blob' }).then(content => {
+            saveAs(content, `alliedframers-pdfs_${Date.now()}.zip`);
+            overlay.style.display = 'none';
+          });
+        } else {
+          const pdf = new jsPDF({ unit: 'px', autoFirstPage: false, compress: true });
+          removeBlankPages(pdf);
+          let idx = 0;
+          const total = images.length;
+          const next = () => {
+            const img = images[idx];
+            pdf.addPage([img.width, img.height], img.width > img.height ? 'l' : 'p');
+            pdf.addImage(img.dataURL, 'PNG', 0, 0, img.width, img.height);
+            idx++;
+            if (idx < total) setTimeout(next, 0);
+            else {
+              pdf.save(`alliedframers-image_${Date.now()}.pdf`);
+              overlay.style.display = 'none';
+            }
+          };
+          next();
+        }
       }, 50);
     };
   </script>

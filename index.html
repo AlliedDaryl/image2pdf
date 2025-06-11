@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Images → PDF</title>
+</head>
+<body style="font-family:sans-serif;max-width:600px;margin:2rem auto">
+  <h1>Convert Images to PDF</h1>
+  <input type="file" id="files" accept="image/*" multiple>
+  <button id="gen">Generate PDF</button>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+    const { jsPDF } = window.jspdf;
+
+    async function fileToDataUrl(file) {
+      return new Promise(res => {
+        const reader = new FileReader();
+        reader.onload = e => res(e.target.result);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    document.getElementById('gen').addEventListener('click', async () => {
+      const input = document.getElementById('files');
+      if (!input.files.length) return alert('Select at least one image');
+
+      const pdf = new jsPDF({ autoFirstPage: false });
+      for (let i = 0; i < input.files.length; i++) {
+        const dataUrl = await fileToDataUrl(input.files[i]);
+        const imgProps = pdf.getImageProperties(dataUrl);
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = (imgProps.height * pageWidth) / imgProps.width;
+
+        pdf.addPage([pageWidth, pageHeight]);
+        pdf.addImage(dataUrl, 0, 0, pageWidth, pageHeight);
+      }
+
+      pdf.save('images.pdf');
+    });
+  </script>
+</body>
+</html>

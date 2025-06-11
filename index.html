@@ -4,118 +4,35 @@
   <meta charset="utf-8" />
   <title>Allied Framers - Image to PDF</title>
   <style>
-    /* Basic layout */
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f5f5;
-      color: #333;
-      margin: 0;
-      padding: 0;
-    }
-    .container {
-      max-width: 800px;
-      margin: 2rem auto;
-      background: white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    header {
-      background: #0d3b66;
-      padding: 1rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-    header img {
-      max-height: 40px;
-      width: auto;
-    }
-    header h1 {
-      margin: 0;
-      font-size: 1.25rem;
-      color: white;
-    }
-    main {
-      padding: 1.5rem;
-    }
-    p {
-      margin: 0 0 1rem;
-      line-height: 1.5;
-    }
-    #dropzone {
-      border: 2px dashed #e95420;
-      border-radius: 4px;
-      padding: 1rem;
-      background: #fcfcfc;
-      text-align: center;
-      color: #777;
-      min-height: 180px;
-      transition: background .2s, border-color .2s;
-    }
-    #dropzone.hover {
-      border-color: #ff7f3f;
-      background: #fffaf5;
-    }
-    #thumbnails {
-      display: flex;
-      flex-wrap: wrap;
-      margin-top: 1rem;
-    }
-    .thumb-container {
-      position: relative;
-      margin: 0.5rem;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .thumb-container img {
-      display: block;
-      max-width: 100px;
-      height: auto;
-    }
-    .remove-btn {
-      position: absolute;
-      top: 4px;
-      right: 4px;
-      background: rgba(255,255,255,0.9);
-      border: none;
-      border-radius: 50%;
-      width: 20px;
-      height: 20px;
-      line-height: 18px;
-      text-align: center;
-      cursor: pointer;
-      font-size: 14px;
-      color: #e95420;
-    }
-    #status {
-      margin-top: 1rem;
-      font-weight: bold;
-    }
-    button#generate {
-      display: block;
-      margin: 1.5rem auto 0;
-      background: #e95420;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 0.75rem 1.5rem;
-      font-size: 1rem;
-      cursor: pointer;
-      transition: background .2s;
-    }
-    button#generate:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-    button#generate:not(:disabled):hover {
-      background: #ff7f3f;
-    }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; color: #333; margin: 0; padding: 0 }
+    .container { position: relative; max-width: 800px; margin: 2rem auto; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden }
+    header { background: #0d3b66; padding: 1rem; display: flex; align-items: center; gap: 1rem }
+    header img { max-height: 40px; width: auto }
+    header h1 { margin: 0; font-size: 1.25rem; color: white }
+    main { padding: 1.5rem }
+    p { margin: 0 0 1rem; line-height: 1.5 }
+    #dropzone { border: 2px dashed #e95420; border-radius: 4px; padding: 1rem; background: #fcfcfc; text-align: center; color: #777; min-height: 180px; transition: background .2s, border-color .2s }
+    #dropzone.hover { border-color: #ff7f3f; background: #fffaf5 }
+    #thumbnails { display: flex; flex-wrap: wrap; margin-top: 1rem }
+    .thumb-container { position: relative; margin: 0.5rem; border: 1px solid #ddd; border-radius: 4px; overflow: hidden }
+    .thumb-container img { display: block; max-width: 100px; height: auto }
+    .remove-btn { position: absolute; top: 4px; right: 4px; background: rgba(255,255,255,0.9); border: none; border-radius: 50%; width: 20px; height: 20px; line-height: 18px; text-align: center; cursor: pointer; font-size: 14px; color: #e95420 }
+    #status { margin-top: 1rem; font-weight: bold }
+    button#generate { display: block; margin: 1.5rem auto 0; background: #e95420; color: white; border: none; border-radius: 4px; padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; transition: background .2s }
+    button#generate:disabled { background: #ccc; cursor: not-allowed }
+    button#generate:not(:disabled):hover { background: #ff7f3f }
+    /* Overlay */
+    #overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); z-index: 100; align-items: center; justify-content: center; flex-direction: column }
+    .loader { border: 8px solid #f3f3f3; border-top: 8px solid #e95420; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 1rem }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="container">
+    <div id="overlay">
+      <div class="loader"></div>
+      <div>Generating PDF...</div>
+    </div>
     <header>
       <img src="https://raw.githubusercontent.com/Allied-Framers-LLC/online/refs/heads/main/AF%2BLLC%2BCorp%2BLogo%2B-%2BCropped-211c13d6-1920w.png" alt="Allied Framers Logo">
       <h1>Image to PDF Converter</h1>
@@ -131,119 +48,118 @@
 
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script>
+    // Pre-instantiate jsPDF for faster startup
     const jsPDF = window.jspdf?.jsPDF || window.jsPDF;
-    if (!jsPDF) throw new Error('jsPDF missing');
+    let PDFClass;
+    if (jsPDF) {
+      PDFClass = jsPDF;
+      new jsPDF({ unit: 'px', format: [1, 1], autoFirstPage: false });
+    } else {
+      throw new Error('jsPDF missing');
+    }
 
     const dz = document.getElementById('dropzone');
     const thumbs = document.getElementById('thumbnails');
     const status = document.getElementById('status');
+    const overlay = document.getElementById('overlay');
     const btn = document.getElementById('generate');
     let images = [];
 
     function updateStatus() {
-      status.textContent = images.length
-        ? `${images.length} image(s) ready`
-        : 'No images yet';
+      status.textContent = images.length ? `${images.length} image(s) ready` : 'No images yet';
       btn.disabled = images.length === 0;
     }
 
-    function addImageObj(obj) {
+    function addImage(obj) {
       if (images.some(i => i.dataURL === obj.dataURL)) return;
       images.push(obj);
-      const wrapper = document.createElement('div');
-      wrapper.className = 'thumb-container';
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'remove-btn';
-      removeBtn.textContent = '×';
-      removeBtn.addEventListener('click', () => {
-        images = images.filter(i => i.dataURL !== obj.dataURL);
-        thumbs.removeChild(wrapper);
-        updateStatus();
-      });
-      const thumb = document.createElement('img');
-      thumb.src = obj.dataURL;
-      wrapper.append(removeBtn, thumb);
-      thumbs.appendChild(wrapper);
+      const container = document.createElement('div'); container.className = 'thumb-container';
+      const remove = document.createElement('button'); remove.className = 'remove-btn'; remove.textContent = '×';
+      remove.onclick = () => { images = images.filter(i => i.dataURL !== obj.dataURL); thumbs.removeChild(container); updateStatus(); };
+      const img = document.createElement('img'); img.src = obj.dataURL;
+      container.append(remove, img); thumbs.appendChild(container);
       updateStatus();
     }
 
-    async function normalizeImage(srcOrFile) {
+    async function normalize(src) {
       return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
+        const img = new Image(); img.crossOrigin = 'anonymous';
         img.onload = () => {
-          const w = img.naturalWidth;
-          const h = img.naturalHeight;
-          const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
+          const w = img.naturalWidth, h = img.naturalHeight;
+          const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0);
           resolve({ dataURL: canvas.toDataURL('image/png'), width: w, height: h });
         };
         img.onerror = reject;
-        if (srcOrFile instanceof File || srcOrFile instanceof Blob) {
-          const reader = new FileReader();
-          reader.onload = () => (img.src = reader.result);
-          reader.readAsDataURL(srcOrFile);
+        if (src instanceof Blob) {
+          const reader = new FileReader(); reader.onload = () => img.src = reader.result; reader.readAsDataURL(src);
         } else {
-          img.src = srcOrFile;
+          img.src = src;
         }
       });
     }
 
+    // Paste support
     dz.addEventListener('paste', async e => {
       e.preventDefault();
-      for (let item of e.clipboardData.items) {
+      for (const item of e.clipboardData.items) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
-          addImageObj(await normalizeImage(item.getAsFile()));
+          addImage(await normalize(item.getAsFile()));
         }
       }
       const html = e.clipboardData.getData('text/html');
       if (html) {
         const doc = new DOMParser().parseFromString(html, 'text/html');
-        for (let imgEl of doc.querySelectorAll('img')) {
-          const src = imgEl.src;
+        for (const el of doc.querySelectorAll('img')) {
           try {
+            const src = el.src;
             if (src.startsWith('data:image/')) {
-              addImageObj(await normalizeImage(src));
+              addImage(await normalize(src));
             } else if (src.startsWith('http')) {
-              const res = await fetch(src, { mode: 'cors' });
-              const blob = await res.blob();
-              addImageObj(await normalizeImage(blob));
+              const blob = await (await fetch(src, { mode: 'cors' })).blob();
+              addImage(await normalize(blob));
             }
           } catch {}
         }
       }
     });
 
+    // Drag & drop support
     dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('hover'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('hover'));
     dz.addEventListener('drop', async e => {
-      e.preventDefault();
-      dz.classList.remove('hover');
-      for (let file of e.dataTransfer.files) {
-        if (file.type.startsWith('image/')) addImageObj(await normalizeImage(file));
+      e.preventDefault(); dz.classList.remove('hover');
+      for (const f of e.dataTransfer.files) {
+        if (f.type.startsWith('image/')) addImage(await normalize(f));
       }
     });
 
-    btn.addEventListener('click', () => {
-      if (!images.length) return;
-      const first = images[0];
-      const w1 = first.width;
-      const h1 = first.height;
-      const orient1 = w1 > h1 ? 'l' : 'p';
-      const pdf = new jsPDF({ unit: 'px', format: [w1, h1], orientation: orient1, compress: true });
-      pdf.addImage(first.dataURL, 'PNG', 0, 0, w1, h1);
-      for (let i = 1; i < images.length; i++) {
-        const img = images[i];
-        const wi = img.width;
-        const hi = img.height;
-        const or = wi > hi ? 'l' : 'p';
-        pdf.addPage([wi, hi], or);
-        pdf.addImage(img.dataURL, 'PNG', 0, 0, wi, hi);
-      }
-      pdf.save('alliedframers-images.pdf');
-    });
+    // Generate PDF with overlay & chunked loop
+    btn.onclick = () => {
+      overlay.style.display = 'flex';
+      setTimeout(() => {
+        if (!PDFClass) return;
+        const pdf = new PDFClass({ unit: 'px', autoFirstPage: false, compress: true });
+        // Remove any initial blank page
+        if (pdf.deletePage && pdf.getNumberOfPages && pdf.getNumberOfPages() > 0) {
+          pdf.deletePage(1);
+        }
+        let idx = 0;
+        const total = images.length;
+        const next = () => {
+          const img = images[idx];
+          pdf.addPage([img.width, img.height], img.width > img.height ? 'l' : 'p');
+          pdf.addImage(img.dataURL, 'PNG', 0, 0, img.width, img.height);
+          idx++;
+          if (idx < total) setTimeout(next, 0);
+          else {
+            pdf.save('alliedframers-images.pdf');
+            overlay.style.display = 'none';
+          }
+        };
+        next();
+      }, 50);
+    };
   </script>
 </body>
 </html>

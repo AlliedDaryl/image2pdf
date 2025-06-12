@@ -26,6 +26,8 @@
     #overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); z-index: 100; align-items: center; justify-content: center; flex-direction: column }
     .loader { border: 8px solid #f3f3f3; border-top: 8px solid #e95420; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 1rem }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .thumb-container.dragging { opacity: 0.5; }
+.thumb-container.drag-over { border: 2px dashed #0d3b66; }
   </style>
 </head>
 <body>
@@ -84,12 +86,62 @@
     function addImage(obj) {
       if (images.some(i => i.dataURL === obj.dataURL)) return;
       images.push(obj);
-      const container = document.createElement('div'); container.className = 'thumb-container';
-      const remove = document.createElement('button'); remove.className = 'remove-btn'; remove.textContent = '×';
-      remove.onclick = () => { images = images.filter(i => i.dataURL !== obj.dataURL); thumbs.removeChild(container); updateStatus(); };
-      const img = document.createElement('img'); img.src = obj.dataURL;
-      container.append(remove, img); thumbs.appendChild(container);
+      renderThumbnails();
       updateStatus();
+    }
+
+    // Renders all thumbnails and enables drag-and-drop sorting
+    function renderThumbnails() {
+      thumbs.innerHTML = '';
+      images.forEach((imgObj, idx) => {
+        const container = document.createElement('div');
+        container.className = 'thumb-container';
+        container.draggable = true;
+        container.dataset.idx = idx;
+
+        // Drag events
+        container.addEventListener('dragstart', e => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', idx);
+          container.classList.add('dragging');
+        });
+        container.addEventListener('dragend', () => {
+          container.classList.remove('dragging');
+        });
+        container.addEventListener('dragover', e => {
+          e.preventDefault();
+          container.classList.add('drag-over');
+        });
+        container.addEventListener('dragleave', () => {
+          container.classList.remove('drag-over');
+        });
+        container.addEventListener('drop', e => {
+          e.preventDefault();
+          container.classList.remove('drag-over');
+          const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+          const toIdx = idx;
+          if (fromIdx !== toIdx) {
+            // Move image in array
+            const moved = images.splice(fromIdx, 1)[0];
+            images.splice(toIdx, 0, moved);
+            renderThumbnails();
+            updateStatus();
+          }
+        });
+
+        const remove = document.createElement('button');
+        remove.className = 'remove-btn';
+        remove.textContent = '×';
+        remove.onclick = () => {
+          images = images.filter(i => i.dataURL !== imgObj.dataURL);
+          renderThumbnails();
+          updateStatus();
+        };
+        const img = document.createElement('img');
+        img.src = imgObj.dataURL;
+        container.append(remove, img);
+        thumbs.appendChild(container);
+      });
     }
 
     async function normalize(src) {
@@ -177,8 +229,12 @@ function removeBlankPages(pdf) {
             const scale = Math.min(availW / img.width, availH / img.height);
             const wImg = img.width * scale;
             const hImg = img.height * scale;
-            const x = margin + (availW - wImg) / 2;
-            const y = margin + (availH - hImg) / 2;
+            const x = pageSizeOpt === 'letter'
+              ? (pdf.internal.pageSize.getWidth() - wImg) / 2
+              : margin + (availW - wImg) / 2;
+            const y = pageSizeOpt === 'letter'
+              ? (pdf.internal.pageSize.getHeight() - hImg) / 2
+              : margin + (availH - hImg) / 2;
             pdf.addImage(img.dataURL, 'PNG', x, y, wImg, hImg);
 
             // Remove the first (blank) page if it exists
@@ -211,8 +267,12 @@ function removeBlankPages(pdf) {
             const scale = Math.min(availW / img.width, availH / img.height);
             const wImg = img.width * scale;
             const hImg = img.height * scale;
-            const x = margin + (availW - wImg) / 2;
-            const y = margin + (availH - hImg) / 2;
+            const x = pageSizeOpt === 'letter'
+              ? (pdf.internal.pageSize.getWidth() - wImg) / 2
+              : margin + (availW - wImg) / 2;
+            const y = pageSizeOpt === 'letter'
+              ? (pdf.internal.pageSize.getHeight() - hImg) / 2
+              : margin + (availH - hImg) / 2;
             pdf.addImage(img.dataURL, 'PNG', x, y, wImg, hImg);
 
             idx++;

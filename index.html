@@ -11,6 +11,8 @@
     header h1 { margin: 0; font-size: 1.25rem; color: white }
     main { padding: 1.5rem }
     p { margin: 0 0 1rem; line-height: 1.5 }
+    #options { display: flex; gap: 1rem; justify-content: center; margin-bottom: 1rem }
+    #options label { display: flex; align-items: center; gap: 0.5rem }
     #dropzone { border: 2px dashed #e95420; border-radius: 4px; padding: 1rem; background: #fcfcfc; text-align: center; color: #777; min-height: 180px; transition: background .2s, border-color .2s }
     #dropzone.hover { border-color: #ff7f3f; background: #fffaf5 }
     #thumbnails { display: flex; flex-wrap: wrap; margin-top: 1rem }
@@ -37,7 +39,18 @@
       <h1>Image to PDF Converter</h1>
     </header>
     <main>
-      <p>Paste your email (Ctrl+V) or drag-and-drop images below. Thumbnails will appear; click the × to remove any. When ready, choose your output option and click “Generate PDF.”</p>
+      <p>Paste your email (Ctrl+V) or drag-and-drop images below. Thumbnails will appear; click the × to remove any. Select options, then click “Generate PDF.”</p>
+      <div id="options">
+        <label>Page Size:
+          <select id="pageSize">
+            <option value="custom">Custom (image size)</option>
+            <option value="letter">Letter</option>
+          </select>
+        </label>
+        <label>Margin (px):
+          <input type="number" id="margin" value="20" min="0">
+        </label>
+      </div>
       <div id="dropzone" contenteditable="true">📋 Paste or drop images here</div>
       <div id="thumbnails"></div>
       <div id="status">No images yet</div>
@@ -108,7 +121,7 @@
             const src = el.src;
             if (src.startsWith('data:image/')) addImage(await normalize(src));
             else if (src.startsWith('http')) addImage(await normalize(await (await fetch(src, { mode: 'cors' })).blob()));
-          } catch {}
+          } catch {} 
         }
       }
     });
@@ -120,42 +133,93 @@
       for (const f of e.dataTransfer.files) if (f.type.startsWith('image/')) addImage(await normalize(f));
     });
 
-    function removeBlankPages(pdf) {
-      if (pdf.getNumberOfPages) {
-        while (pdf.getNumberOfPages() > 0) pdf.deletePage(1);
+function removeBlankPages(pdf) {
+  // only delete page if there's more than one and if the first page is truly blank
+  try {
+    const pages = pdf.getNumberOfPages();
+    if (pages > 1) {
+      // check for content on first page
+      const meta = pdf.internal.pages[1];
+      // pages array holds page content streams; empty stream means blank
+      if (!meta || (Array.isArray(meta) && meta.length === 0)) {
+        pdf.deletePage(1);
       }
     }
+  } catch (e) {
+    console.warn('Error deleting blank page', e);
+  }
+}
+
 
     btn.onclick = async () => {
       overlay.style.display = 'flex';
       setTimeout(async () => {
+        const margin = parseInt(document.getElementById('margin').value, 10) || 0;
+        const pageSizeOpt = document.getElementById('pageSize').value;
+
         if (individualZip.checked) {
           const zip = new JSZip();
           for (let i = 0; i < images.length; i++) {
             const img = images[i];
-            const pdf = new jsPDF({ unit: 'px', autoFirstPage: false, compress: true });
-            removeBlankPages(pdf);
-            pdf.addPage([img.width, img.height], img.width > img.height ? 'l' : 'p');
-            pdf.addImage(img.dataURL, 'PNG', 0, 0, img.width, img.height);
+            const pdfOpts = { unit: 'px', autoFirstPage: false, compress: true };
+            if (pageSizeOpt === 'letter') pdfOpts.format = 'letter';
+            const pdf = new jsPDF(pdfOpts);
+
+            // Always add the first page
+            const pageWidth = pageSizeOpt === 'letter' ? pdf.internal.pageSize.width : img.width + 2*margin;
+            const pageHeight = pageSizeOpt === 'letter' ? pdf.internal.pageSize.height : img.height + 2*margin;
+            const orient = img.width > img.height ? 'l' : 'p';
+            if (pageSizeOpt === 'letter') pdf.addPage('letter', orient);
+            else pdf.addPage([pageWidth, pageHeight], orient);
+
+            const availW = pageWidth - 2 * margin;
+            const availH = pageHeight - 2 * margin;
+            const scale = Math.min(availW / img.width, availH / img.height);
+            const wImg = img.width * scale;
+            const hImg = img.height * scale;
+            const x = margin + (availW - wImg) / 2;
+            const y = margin + (availH - hImg) / 2;
+            pdf.addImage(img.dataURL, 'PNG', x, y, wImg, hImg);
+
+            // Remove the first (blank) page if it exists
+            if (pdf.getNumberOfPages() > 1) pdf.deletePage(1);
+
             const blob = pdf.output('blob');
-            zip.file(`image_${Date.now()}_${i+1}.pdf`, blob);
+            zip.file(`image_${Date.now()}_${i + 1}.pdf`, blob);
           }
           zip.generateAsync({ type: 'blob' }).then(content => {
             saveAs(content, `alliedframers-pdfs_${Date.now()}.zip`);
             overlay.style.display = 'none';
           });
         } else {
-          const pdf = new jsPDF({ unit: 'px', autoFirstPage: false, compress: true });
-          removeBlankPages(pdf);
+          const pdfOpts = { unit: 'px', autoFirstPage: false, compress: true };
+          if (pageSizeOpt === 'letter') pdfOpts.format = 'letter';
+          const pdf = new jsPDF(pdfOpts);
           let idx = 0;
           const total = images.length;
           const next = () => {
             const img = images[idx];
-            pdf.addPage([img.width, img.height], img.width > img.height ? 'l' : 'p');
-            pdf.addImage(img.dataURL, 'PNG', 0, 0, img.width, img.height);
+            const pageWidth = pageSizeOpt === 'letter' ? pdf.internal.pageSize.getWidth() : img.width + 2*margin;
+            const pageHeight = pageSizeOpt === 'letter' ? pdf.internal.pageSize.getHeight() : img.height + 2*margin;
+            const orient = img.width > img.height ? 'l' : 'p';
+            // Always add a page for each image
+            if (pageSizeOpt === 'letter') pdf.addPage('letter', orient);
+            else pdf.addPage([pageWidth, pageHeight], orient);
+
+            const availW = pageWidth - 2 * margin;
+            const availH = pageHeight - 2 * margin;
+            const scale = Math.min(availW / img.width, availH / img.height);
+            const wImg = img.width * scale;
+            const hImg = img.height * scale;
+            const x = margin + (availW - wImg) / 2;
+            const y = margin + (availH - hImg) / 2;
+            pdf.addImage(img.dataURL, 'PNG', x, y, wImg, hImg);
+
             idx++;
             if (idx < total) setTimeout(next, 0);
             else {
+              // Remove the first (blank) page if it exists
+              if (pdf.getNumberOfPages() > images.length) pdf.deletePage(1);
               pdf.save(`alliedframers-image_${Date.now()}.pdf`);
               overlay.style.display = 'none';
             }

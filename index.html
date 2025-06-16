@@ -36,6 +36,9 @@
       <div class="loader"></div>
       <div>Generating PDF...</div>
     </div>
+    <div id="dz-loading" style="display:none; position:absolute; left:0; right:0; top:0; bottom:0; background:rgba(255,255,255,0.7); z-index:50; align-items:center; justify-content:center; font-size:1.2rem;">
+  <span>Loading image...</span>
+</div>
     <header>
       <img src="https://raw.githubusercontent.com/Allied-Framers-LLC/online/refs/heads/main/AF%2BLLC%2BCorp%2BLogo%2B-%2BCropped-211c13d6-1920w.png" alt="Allied Framers Logo">
       <h1>Image to PDF Converter</h1>
@@ -66,6 +69,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.0/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
   <script>
     const jsPDF = window.jspdf?.jsPDF || window.jsPDF;
     if (!jsPDF) throw new Error('jsPDF missing');
@@ -76,6 +80,7 @@
     const overlay = document.getElementById('overlay');
     const btn = document.getElementById('generate');
     const individualZip = document.getElementById('individualZip');
+    const dzLoading = document.getElementById('dz-loading');
     let images = [];
 
     function updateStatus() {
@@ -83,7 +88,7 @@
       btn.disabled = images.length === 0;
     }
 
-    function addImage(obj) {
+    async function addImage(obj) {
       if (images.some(i => i.dataURL === obj.dataURL)) return;
       images.push(obj);
       renderThumbnails();
@@ -99,34 +104,46 @@
         container.draggable = true;
         container.dataset.idx = idx;
 
-        // Drag events
+        // Prevent dropping files into thumbnail area
+        container.addEventListener('dragover', e => {
+          // Only allow dragover if dragging a thumbnail (internal)
+          if (e.dataTransfer.types.includes('text/plain')) {
+            e.preventDefault();
+            container.classList.add('drag-over');
+          }
+          e.stopPropagation();
+        });
+        container.addEventListener('dragleave', e => {
+          container.classList.remove('drag-over');
+          e.stopPropagation();
+        });
+        container.addEventListener('drop', e => {
+          // Only handle drop if it's a thumbnail move (internal)
+          if (e.dataTransfer.types.includes('text/plain')) {
+            e.preventDefault();
+            e.stopPropagation();
+            container.classList.remove('drag-over');
+            const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            const toIdx = idx;
+            if (fromIdx !== toIdx) {
+              // Move image in array
+              const moved = images.splice(fromIdx, 1)[0];
+              images.splice(toIdx, 0, moved);
+              renderThumbnails();
+              updateStatus();
+            }
+          }
+        });
         container.addEventListener('dragstart', e => {
           e.dataTransfer.effectAllowed = 'move';
           e.dataTransfer.setData('text/plain', idx);
           container.classList.add('dragging');
+          // Prevent browser from treating this as a file drag
+          e.stopPropagation();
         });
-        container.addEventListener('dragend', () => {
+        container.addEventListener('dragend', e => {
           container.classList.remove('dragging');
-        });
-        container.addEventListener('dragover', e => {
-          e.preventDefault();
-          container.classList.add('drag-over');
-        });
-        container.addEventListener('dragleave', () => {
-          container.classList.remove('drag-over');
-        });
-        container.addEventListener('drop', e => {
-          e.preventDefault();
-          container.classList.remove('drag-over');
-          const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
-          const toIdx = idx;
-          if (fromIdx !== toIdx) {
-            // Move image in array
-            const moved = images.splice(fromIdx, 1)[0];
-            images.splice(toIdx, 0, moved);
-            renderThumbnails();
-            updateStatus();
-          }
+          e.stopPropagation();
         });
 
         const remove = document.createElement('button');
@@ -138,32 +155,99 @@
           updateStatus();
         };
         const img = document.createElement('img');
-        img.src = imgObj.dataURL;
+        img.src = imgObj.thumbURL || imgObj.dataURL; // Use thumbnail if available
         container.append(remove, img);
         thumbs.appendChild(container);
+      });
+
+      // Prevent dropping files into the thumbnails area itself
+      thumbs.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      thumbs.addEventListener('drop', e => {
+        e.preventDefault();
+        e.stopPropagation();
       });
     }
 
     async function normalize(src) {
-      return new Promise((resolve, reject) => {
+      return new Promise(async (resolve, reject) => {
+        let blob;
+        if (src instanceof Blob) {
+          blob = src;
+        } else if (typeof src === "string" && src.startsWith("data:")) {
+          // Convert dataURL to Blob
+          const arr = src.split(','), mime = arr[0].match(/:(.*?);/)[1];
+          const bstr = atob(arr[1]);
+          let n = bstr.length, u8arr = new Uint8Array(n);
+          while(n--) u8arr[n] = bstr.charCodeAt(n);
+          blob = new Blob([u8arr], {type:mime});
+        } else {
+          // fallback: treat as URL
+          try {
+            blob = await (await fetch(src)).blob();
+          } catch (e) {
+            return reject(e);
+          }
+        }
+
+        // If HEIC, convert to PNG
+        if (blob.type === "image/heic" || blob.name?.toLowerCase().endsWith(".heic")) {
+          try {
+            const pngBlob = await heic2any({ blob, toType: "image/png" });
+            blob = pngBlob instanceof Blob ? pngBlob : pngBlob[0];
+          } catch (e) {
+            return reject(e);
+          }
+        }
+
         const img = new Image(); img.crossOrigin = 'anonymous';
         img.onload = () => {
           const w = img.naturalWidth, h = img.naturalHeight;
+          // Full-size dataURL
           const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0);
-          resolve({ dataURL: canvas.toDataURL('image/png'), width: w, height: h });
+          const dataURL = canvas.toDataURL('image/png');
+
+          // Thumbnail (max 100px wide)
+          const thumbW = 100;
+          const scale = thumbW / w;
+          const thumbH = Math.round(h * scale);
+          const thumbCanvas = document.createElement('canvas');
+          thumbCanvas.width = thumbW;
+          thumbCanvas.height = thumbH;
+          thumbCanvas.getContext('2d').drawImage(img, 0, 0, thumbW, thumbH);
+          const thumbURL = thumbCanvas.toDataURL('image/png');
+
+          resolve({ dataURL, width: w, height: h, thumbURL });
         };
         img.onerror = reject;
-        if (src instanceof Blob) {
-          const reader = new FileReader(); reader.onload = () => img.src = reader.result; reader.readAsDataURL(src);
-        } else img.src = src;
+        const reader = new FileReader();
+        reader.onload = () => { img.src = reader.result; };
+        reader.readAsDataURL(blob);
       });
     }
 
     dz.addEventListener('paste', async e => {
       e.preventDefault();
+      dzLoading.style.display = 'flex';
+      let found = false;
       for (const item of e.clipboardData.items) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) addImage(await normalize(item.getAsFile()));
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (
+            file &&
+            (file.type.startsWith('image/') ||
+             file.type === 'image/heic' ||
+             file.name?.toLowerCase().endsWith('.heic'))
+          ) {
+            found = true;
+            try {
+              await addImage(await normalize(file));
+            } catch {}
+          }
+        }
       }
       const html = e.clipboardData.getData('text/html');
       if (html) {
@@ -171,10 +255,20 @@
         for (const el of doc.querySelectorAll('img')) {
           try {
             const src = el.src;
-            if (src.startsWith('data:image/')) addImage(await normalize(src));
-            else if (src.startsWith('http')) addImage(await normalize(await (await fetch(src, { mode: 'cors' })).blob()));
-          } catch {} 
+            if (src.startsWith('data:image/')) {
+              found = true;
+              await addImage(await normalize(src));
+            } else if (src.startsWith('http')) {
+              found = true;
+              await addImage(await normalize(await (await fetch(src, { mode: 'cors' })).blob()));
+            }
+          } catch {}
         }
+      }
+      dzLoading.style.display = 'none';
+      if (!found) {
+        dzLoading.innerHTML = '<span>Unrecognized image format.</span>';
+        setTimeout(() => { dzLoading.style.display = 'none'; dzLoading.innerHTML = '<span>Loading image...</span>'; }, 1500);
       }
     });
 
@@ -182,7 +276,25 @@
     dz.addEventListener('dragleave', () => dz.classList.remove('hover'));
     dz.addEventListener('drop', async e => {
       e.preventDefault(); dz.classList.remove('hover');
-      for (const f of e.dataTransfer.files) if (f.type.startsWith('image/')) addImage(await normalize(f));
+      dzLoading.style.display = 'flex';
+      let found = false;
+      for (const f of e.dataTransfer.files) {
+        if (
+          f.type.startsWith('image/') ||
+          f.type === 'image/heic' ||
+          f.name?.toLowerCase().endsWith('.heic')
+        ) {
+          found = true;
+          try {
+            await addImage(await normalize(f));
+          } catch {}
+        }
+      }
+      dzLoading.style.display = 'none';
+      if (!found) {
+        dzLoading.innerHTML = '<span>Unrecognized image format.</span>';
+        setTimeout(() => { dzLoading.style.display = 'none'; dzLoading.innerHTML = '<span>Loading image...</span>'; }, 1500);
+      }
     });
 
 function removeBlankPages(pdf) {

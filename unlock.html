@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Allied Framers - Unlock PDF (Client-side)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; background:#f5f5f5; color:#333; margin:0 }
+    .container { position:relative; max-width:800px; margin:2rem auto; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.1); border-radius:8px; overflow:hidden }
+    header { background:#0d3b66; padding:1rem; display:flex; align-items:center; gap:1rem }
+    header img { max-height:40px; width:auto }
+    header h1 { margin:0; font-size:1.25rem; color:#fff }
+    nav { margin-left:auto; display:flex; gap:.75rem }
+    nav a { color:#fff; text-decoration:none; font-size:.95rem; opacity:.9 }
+    nav a:hover, nav a[aria-current="page"] { opacity:1 }
+
+    main { padding:1.5rem }
+    p { margin:0 0 1rem; line-height:1.5 }
+    .row { display:flex; gap:1rem; align-items:center; margin:0.75rem 0; flex-wrap:wrap }
+    .row label { min-width:110px }
+    input[type="file"] { display:none }
+    .btn { background:#0d3b66; color:#fff; padding:.55rem .9rem; border:none; border-radius:4px; cursor:pointer }
+    .btn:hover { filter:brightness(1.08) }
+    .accent { background:#e95420 }
+    .accent:hover { background:#ff7f3f }
+    #dropzone { border:2px dashed #e95420; border-radius:4px; padding:1.25rem; background:#fcfcfc; text-align:center; color:#777; min-height:140px; transition:background .2s, border-color .2s }
+    #dropzone.hover { border-color:#ff7f3f; background:#fffaf5 }
+    #status { margin-top:1rem; font-weight:bold }
+    #overlay { display:none; position:absolute; inset:0; background:rgba(255,255,255,.85); z-index:100; align-items:center; justify-content:center; flex-direction:column }
+    .loader { border:8px solid #f3f3f3; border-top:8px solid #e95420; border-radius:50%; width:60px; height:60px; animation:spin 1s linear infinite; margin-bottom:1rem }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .hint { font-size:.9rem; color:#666 }
+    footer { padding:1rem 1.5rem; font-size:.85rem; color:#666 }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="overlay">
+      <div class="loader"></div>
+      <div id="progressText">Working…</div>
+    </div>
+
+    <header>
+      <img src="https://raw.githubusercontent.com/Allied-Framers-LLC/online/refs/heads/main/AF%2BLLC%2BCorp%2BLogo%2B-%2BCropped-211c13d6-1920w.png" alt="Allied Framers Logo">
+      <h1>Unlock PDF (Client-side)</h1>
+      <nav>
+        <a href="./index.html">Image → PDF</a>
+        <a href="./unlock.html" aria-current="page">Unlock PDF</a>
+      </nav>
+    </header>
+
+    <main>
+      <p>Upload a PDF you can open normally. We’ll rebuild it page-for-page and give you a new copy without editing/printing restrictions.</p>
+
+      <div class="row">
+        <label>PDF file</label>
+        <button class="btn" id="chooseBtn">Choose PDF</button>
+        <input id="fileInput" type="file" accept="application/pdf" />
+      </div>
+
+      <div id="dropzone">📄 Drop a PDF here or click “Choose PDF”</div>
+
+      <div class="hint"></div>
+
+      <div id="status">No file selected</div>
+
+      <div class="row" style="justify-content:center; margin-top:1rem">
+        <button class="btn accent" id="unlock" disabled>Create Unlocked Copy</button>
+      </div>
+    </main>
+
+    <footer>
+      Note: This simply copies all pages into a fresh PDF client-side. Useful when a file opens fine but shows “locked” for editing/printing.
+    </footer>
+  </div>
+
+  <!-- pdf-lib -->
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+  <script>
+    const { PDFDocument } = PDFLib;
+
+    const chooseBtn = document.getElementById('chooseBtn');
+    const fileInput = document.getElementById('fileInput');
+    const dropzone = document.getElementById('dropzone');
+    const overlay = document.getElementById('overlay');
+    const progressText = document.getElementById('progressText');
+    const statusEl = document.getElementById('status');
+    const unlockBtn = document.getElementById('unlock');
+
+    let selectedFile = null;
+
+    function setStatus(msg) { statusEl.textContent = msg; }
+    function setProgress(msg) { progressText.textContent = msg; }
+
+    function setFile(file) {
+      if (!file) return;
+      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+        setStatus('Please select a .pdf file');
+        selectedFile = null;
+        unlockBtn.disabled = true;
+        return;
+      }
+      selectedFile = file;
+      setStatus(`Ready: ${file.name} (${(file.size/1024/1024).toFixed(2)} MB)`);
+      unlockBtn.disabled = false;
+    }
+
+    chooseBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => setFile(e.target.files[0]));
+
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('hover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('hover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('hover');
+      const f = e.dataTransfer.files?.[0];
+      setFile(f);
+    });
+
+    function readAsArrayBuffer(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = reject;
+        fr.readAsArrayBuffer(file);
+      });
+    }
+
+    async function unlockClientSide() {
+      if (!selectedFile) return;
+      overlay.style.display = 'flex';
+      setProgress('Loading PDF…');
+
+      try {
+        const srcBytes = new Uint8Array(await readAsArrayBuffer(selectedFile));
+
+        // Load the original (must be openable w/o password as you noted)
+        const srcDoc = await PDFDocument.load(srcBytes, {
+          // leave default parsing; we are not handling encrypted files
+          updateMetadata: false,
+        });
+
+        const pageCount = srcDoc.getPageCount?.() || srcDoc.getPageIndices().length;
+        setProgress(`Copying ${pageCount} page(s)…`);
+
+        // Create a fresh PDF and copy all pages over (removes any “locked” permissions)
+        const outDoc = await PDFDocument.create();
+        const allIndices = srcDoc.getPageIndices();
+        const copiedPages = await outDoc.copyPages(srcDoc, allIndices);
+        copiedPages.forEach(p => outDoc.addPage(p));
+
+        // (Optional) preserve basic metadata if available
+        try {
+          const title = srcDoc.getTitle?.();
+          const author = srcDoc.getAuthor?.();
+          const subject = srcDoc.getSubject?.();
+          const keywords = srcDoc.getKeywords?.();
+          const producer = srcDoc.getProducer?.();
+          const creator = srcDoc.getCreator?.();
+
+          if (title) outDoc.setTitle(title);
+          if (author) outDoc.setAuthor(author);
+          if (subject) outDoc.setSubject(subject);
+          if (keywords) outDoc.setKeywords(keywords);
+          if (producer) outDoc.setProducer(producer);
+          if (creator) outDoc.setCreator(creator);
+        } catch (_) { /* metadata is best-effort */ }
+
+        setProgress('Packaging…');
+        const outBytes = await outDoc.save({ useObjectStreams: true });
+
+        const blob = new Blob([outBytes], { type: 'application/pdf' });
+        const outName = (selectedFile.name.replace(/\.pdf$/i, '') || 'document') + '_unlocked.pdf';
+
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = outName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+
+        setStatus(`Unlocked and downloaded: ${outName}`);
+      } catch (err) {
+        console.error(err);
+        // Common failure cases here are truly encrypted PDFs, or corrupt files
+        setStatus(`Error: ${err.message || err}`);
+      } finally {
+        overlay.style.display = 'none';
+      }
+    }
+
+    unlockBtn.addEventListener('click', unlockClientSide);
+  </script>
+</body>
+</html>
